@@ -53,6 +53,7 @@ async def test_seg7_idle_exhaustive(dut):
         dut_i(dut).score.value = 0
         dut_i(dut).blink_timer.value = 0
         await settle()
+
         expected = 0x80 | seg7_encode(val)
         assert uo(dut) == expected, (
             f"[FAIL] IDLE seg7 mismatch for {val}: expected 0x{expected:02X}, got 0x{uo(dut):02X}"
@@ -156,19 +157,20 @@ async def test_obstacle_pipeline_jump_scores(dut):
     dut_i(dut).obs_passed.value = 0
     await settle()
 
-    await step_clk(dut, 2)
-    assert obs_c(dut) == 0 and obs_g(dut) == 1 and obs_f(dut) == 0, (
-        f"[FAIL] stage1 mismatch: c/g/f=({obs_c(dut)}/{obs_g(dut)}/{obs_f(dut)})"
+    # frame_tick es true ya en el primer ciclo cuando clk_div=0 y frame_max=0
+    await step_clk(dut, 1)
+    assert obs_c(dut) == 0 and obs_g(dut) == 1 and obs_f(dut) == 0 and dut_i(dut).obs_passed.value.integer == 0, (
+        f"[FAIL] stage1 mismatch: c/g/f/p=({obs_c(dut)}/{obs_g(dut)}/{obs_f(dut)}/{dut_i(dut).obs_passed.value.integer})"
     )
 
     await step_clk(dut, 1)
-    assert obs_c(dut) == 0 and obs_g(dut) == 0 and obs_f(dut) == 1, (
-        f"[FAIL] stage2 mismatch: c/g/f=({obs_c(dut)}/{obs_g(dut)}/{obs_f(dut)})"
+    assert obs_c(dut) == 0 and obs_g(dut) == 0 and obs_f(dut) == 1 and dut_i(dut).obs_passed.value.integer == 0, (
+        f"[FAIL] stage2 mismatch: c/g/f/p=({obs_c(dut)}/{obs_g(dut)}/{obs_f(dut)}/{dut_i(dut).obs_passed.value.integer})"
     )
 
     await step_clk(dut, 1)
-    assert obs_f(dut) == 0 and dut_i(dut).obs_passed.value.integer == 1, (
-        f"[FAIL] stage3 mismatch: obs_f={obs_f(dut)} obs_passed={dut_i(dut).obs_passed.value.integer}"
+    assert obs_c(dut) == 0 and obs_g(dut) == 0 and obs_f(dut) == 0 and dut_i(dut).obs_passed.value.integer == 1, (
+        f"[FAIL] stage3 mismatch: c/g/f/p=({obs_c(dut)}/{obs_g(dut)}/{obs_f(dut)}/{dut_i(dut).obs_passed.value.integer})"
     )
 
     await step_clk(dut, 1)
@@ -200,7 +202,7 @@ async def test_run_hit_updates_high_score(dut):
     dut_i(dut).lfsr.value = 0
     await settle()
 
-    await step_clk(dut, 2)
+    await step_clk(dut, 1)
     assert state(dut) == S_HIT, f"[FAIL] RUN + obs_f should transition to HIT, got {state(dut)}"
     assert max_score(dut) == 3, f"[FAIL] max_score should update on hit, got {max_score(dut)}"
     assert uo(dut) == 0xFF, f"[FAIL] HIT output should be 0xFF, got 0x{uo(dut):02X}"
