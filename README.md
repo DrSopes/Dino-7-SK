@@ -1,42 +1,102 @@
-![](../../workflows/gds/badge.svg) ![](../../workflows/docs/badge.svg) ![](../../workflows/test/badge.svg) ![](../../workflows/fpga/badge.svg)
+# Dino-7 Tiny Tapeout game
 
-# Tiny Tapeout Verilog Project Template
+This project implements a one-button dinosaur-style reflex game for Tiny Tapeout. The player starts from `IDLE`, jumps over procedurally generated obstacles, advances through seven difficulty levels, and wins after clearing level 7. The game is designed to run both on hardware and in cocotb simulation, with fast timing selected when `COCOTB_SIM` is defined.
 
-- [Read the documentation for project](docs/info.md)
+## Controls
 
-## What is Tiny Tapeout?
+The design uses the Tiny Tapeout standard I/O layout:
 
-Tiny Tapeout is an educational project that aims to make it easier and cheaper than ever to get your digital and analog designs manufactured on a real chip.
+- `ui_in[0]`: jump button.
+- `ui_in[1]`: in-game reset.
+- `ui_in[3:2]`: starting difficulty preset.
+- `ui_in[7:4]`: 4-bit seed for the obstacle generator.
+- `uo_out[7:0]`: game display and debug output.
+- `uio_in`, `uio_out`, `uio_oe`: unused in gameplay.
 
-To learn more and get started, visit https://tinytapeout.com.
+A jump from `IDLE` starts the game. During gameplay, the player can only jump from `S_RUN` when the cooldown counter is zero.
 
-## Set up your Verilog project
+## Game flow
 
-1. Add your Verilog files to the `src` folder.
-2. Edit the [info.yaml](info.yaml) and update information about your project, paying special attention to the `source_files` and `top_module` properties. If you are upgrading an existing Tiny Tapeout project, check out our [online info.yaml migration tool](https://tinytapeout.github.io/tt-yaml-upgrade-tool/).
-3. Edit [docs/info.md](docs/info.md) and add a description of your project.
-4. Adapt the testbench to your design. See [test/README.md](test/README.md) for more information.
+The game uses these states:
 
-The GitHub action will automatically build the ASIC files using [LibreLane](https://www.zerotoasiccourse.com/terminology/librelane/).
+- `S_IDLE`: waiting to start, 7-segment display shows the best completed level with decimal point on.
+- `S_RUN`: player is on the ground.
+- `S_JUMP`: player is airborne for a short timer-controlled duration.
+- `S_HIT`: collision feedback, all segments on.
+- `S_SCORE`: post-death score/best-level display blink phase.
+- `S_WIN`: final celebration after clearing level 7.
 
-## Enable GitHub actions to build the results page
+Obstacles move through a three-stage pipeline: `obs_c -> obs_g -> obs_f -> obs_passed`. A collision happens when `obs_f == 1` while the state is `S_RUN`. A successful jump scores when `obs_passed == 1` while the state is `S_JUMP`.
 
-- [Enabling GitHub Pages](https://tinytapeout.com/faq/#my-github-action-is-failing-on-the-pages-part)
+## Scoring and levels
 
-## Resources
+`points_in_level` counts the successful jumps within the current level. When the player reaches 7 points in a level, the game either advances to the next level or enters `S_WIN` if level 7 has been completed.
 
-- [FAQ](https://tinytapeout.com/faq/)
-- [Digital design lessons](https://tinytapeout.com/digital_design/)
-- [Learn how semiconductors work](https://tinytapeout.com/siliwiz/)
-- [Join the community](https://tinytapeout.com/discord)
-- [Build your design locally](https://www.tinytapeout.com/guides/local-hardening/)
+`current_level` tracks the active level from 0 to 6, and `best_level_completed` stores the highest cleared level from 0 to 7. On every completed level, `frame_period` is reduced by `difficulty_step`, which makes the game faster.
 
-## What next?
+## Outputs during gameplay
 
-- [Submit your design to the next shuttle](https://app.tinytapeout.com/).
-- Edit [this README](README.md) and explain your design, how it works, and how to test it.
-- Share your project on your social network of choice:
-  - LinkedIn [#tinytapeout](https://www.linkedin.com/search/results/content/?keywords=%23tinytapeout) [@TinyTapeout](https://www.linkedin.com/company/100708654/)
-  - Mastodon [#tinytapeout](https://chaos.social/tags/tinytapeout) [@matthewvenn](https://chaos.social/@matthewvenn)
-  - X (formerly Twitter) [#tinytapeout](https://twitter.com/hashtag/tinytapeout) [@tinytapeout](https://twitter.com/tinytapeout)
-  - Bluesky [@tinytapeout.com](https://bsky.app/profile/tinytapeout.com)
+During `S_RUN` and `S_JUMP`, `uo_out` is used as a compact debug/gameplay view:
+
+- `uo_out[0] = obs_c`
+- `uo_out[1] = obs_g`
+- `uo_out[2] = (state == S_RUN)`
+- `uo_out[3] = obs_passed`
+- `uo_out[4] = (state == S_JUMP)`
+- `uo_out[5] = unused_ok`
+- `uo_out[6] = obs_f`
+- `uo_out[7] = (cooldown_timer > 0)`
+
+Outside gameplay:
+
+- In `S_IDLE`, the display shows `best_level_completed` on the 7-segment display with decimal point on.
+- In `S_HIT`, all outputs are set to `8'hFF`.
+- In `S_SCORE`, the display alternates between current points and best completed level.
+- In `S_WIN`, the 7-segment display flashes all seven segments seven times, then returns to `S_IDLE`.
+
+## Simulation and tests
+
+The project is intended to be simulated with cocotb and Icarus Verilog.
+
+Run the full RTL regression:
+
+```sh
+make -B
+```
+
+Run a single gameplay-only test:
+
+```sh
+cd test
+COCOTB_TEST_MODULES=test_gameplay COCOTB_TESTCASE=test_full_gameplay_autoplay make -f Makefile results.xml
+```
+
+Run the complete gameplay-oriented suite:
+
+```sh
+cd test
+COCOTB_TEST_MODULES=test,test_extra,test_gameplay make -f Makefile results.xml
+```
+
+## Waveforms
+
+To inspect the simulation:
+
+```sh
+gtkwave tb.fst
+```
+
+Useful internal signals to observe are:
+
+- `state`
+- `points_in_level`
+- `current_level`
+- `best_level_completed`
+- `frame_period`
+- `frame_tick`
+- `obs_c`, `obs_g`, `obs_f`, `obs_passed`
+- `jump_timer`
+- `cooldown_timer`
+- `uo_out`
+
+For clean debugging, prefer generating a waveform from a single test instead of the whole regression, because the full regression concatenates many scenarios into one `tb.fst`.
