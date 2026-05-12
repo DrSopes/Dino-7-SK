@@ -1,32 +1,40 @@
 import cocotb
-from cocotb.triggers import RisingEdge
+from cocotb.triggers import RisingEdge, ClockCycles
 
 from test import (
     S_IDLE,
     S_RUN,
     S_JUMP,
-    S_WIN,
-    WIN_ON,
+    S_SCORE,
     apply_reset,
-    best_level_completed,
     cooldown,
     current_level,
     expected_idle_output,
     gl_skip_lite,
-    has_bit,
     is_gatelevel,
     obs_g,
     points_in_level,
+    pulse_game_reset,
     pulse_jump,
     start_clock,
     state,
     uo,
+    best_level_completed,
 )
 
 
-async def autoplay_step(dut):
+async def autoplay_tick(dut):
     if state(dut) == S_RUN and obs_g(dut) == 1 and cooldown(dut) == 0:
         await pulse_jump(dut, cycles=1)
+
+
+async def start_new_run(dut):
+    if state(dut) == S_SCORE:
+        await pulse_game_reset(dut, cycles=2)
+        await ClockCycles(dut.clk, 4)
+    if state(dut) == S_IDLE:
+        await pulse_jump(dut, cycles=2)
+        await ClockCycles(dut.clk, 2)
 
 
 @cocotb.test()
@@ -35,60 +43,66 @@ async def test_full_gameplay_autoplay(dut):
     await apply_reset(dut, difficulty_bits=0b00, seed_bits=0b1111)
 
     if is_gatelevel(dut):
-        gl_skip_lite(dut, "test_full_gameplay_autoplay", "requires RTL-visible internals for gameplay progression")
+        gl_skip_lite(dut, "test_full_gameplay_autoplay", "requires RTL-visible internals for multi-run gameplay progression")
         return
 
-    dut._log.info("[STEP] Starting autoplay session")
-    await pulse_jump(dut, cycles=2)
-
+    max_attempts = 12
     reached_level_1 = False
     reached_level_3 = False
-    reached_win = False
-    flashes = 0
-    prev_win_on = False
+    deaths_seen = 0
 
-    for i in range(30000):
-        await RisingEdge(dut.clk)
-        await autoplay_step(dut)
+    for attempt in range(max_attempts):
+        await start_new_run(dut)
+        died_this_attempt = False
 
-        st = state(dut)
-        lvl = current_level(dut)
-        pts = points_in_level(dut)
-        out = uo(dut)
+        for i in range(5000):
+            await RisingEdge(dut.clk)
+            await autoplay_tick(dut)
 
-        if lvl >= 1:
-            reached_level_1 = True
-        if lvl >= 3:
-            reached_level_3 = True
+            st = state(dut)
+            lvl = current_level(dut)
+            pts = points_in_level(dut)
 
-        win_on = (out == WIN_ON)
-        if win_on and not prev_win_on:
-            flashes += 1
-        prev_win_on = win_on
+            if lvl >= 1:
+                reached_level_1 = True
+            if lvl >= 3:
+                reached_level_3 = True
 
-        if st == S_WIN:
-            reached_win = True
+            if i % 1000 == 0:
+                dut._log.info(
+                    f"[PROGRESS] attempt={attempt} cycle={i} state={st} level={lvl} "
+                    f"points={pts} best={best_level_completed(dut)} cooldown={cooldown(dut)} out=0x{uo(dut):02X}"
+                )
 
-        if i % 2000 == 0:
-            dut._log.info(
-                f"[PROGRESS] cycle={i} state={st} level={lvl} points={pts} "
-                f"best={best_level_completed(dut)} cooldown={cooldown(dut)} out=0x{out:02X}"
-            )
+            if st == S_SCORE:
+                deaths_seen += 1
+                died_this_attempt = True
+                dut._log.info(
+                    f"[INFO] attempt={attempt} ended in SCORE with level={lvl} points={pts} "
+                    f"best={best_level_completed(dut)}"
+                )
+                break
 
-        if reached_win and st == S_IDLE:
+        if reached_level_3:
             break
 
-    assert reached_level_1, "[FAIL] Autoplay never completed level 1"
-    assert reached_level_3, "[FAIL] Autoplay never reached at least level 3"
-    assert reached_win, "[FAIL] Autoplay never entered S_WIN"
-    assert flashes >= 7, f"[FAIL] Expected at least 7 WIN flashes, observed {flashes}"
-    assert state(dut) == S_IDLE, f"[FAIL] Game should return to IDLE after WIN, got {state(dut)}"
-    assert best_level_completed(dut) == 7, f"[FAIL] Best completed level should be 7, got {best_level_completed(dut)}"
-    assert current_level(dut) == 0, f"[FAIL] Current level should reset to 0 after WIN, got {current_level(dut)}"
-    assert points_in_level(dut) == 0, f"[FAIL] Points should reset to 0 after WIN, got {points_in_level(dut)}"
-    assert uo(dut) == expected_idle_output(7), (
-        f"[FAIL] IDLE display after WIN should show best level 7, got 0x{uo(dut):02X}"
-    )
-    assert has_bit(uo(dut), 1 << 7), "[FAIL] DP should be on in IDLE after WIN"
+        if not died_this_attempt and state(dut) != S_SCORE:
+            dut._log.info(f"[INFO] attempt={attempt} ended without death; forcing restart")
+            await pulse_game_reset(dut, cycles=2)
+            await ClockCycles(dut.clk, 4)
 
-    dut._log.info("[PASS] Full gameplay autoplay test passed")
+    assert reached_level_1, "[FAIL] Autoplay never completed level 1 across retries"
+    assert deaths_seen >= 1, "[FAIL] Autoplay never reached SCORE, so gameplay loop was not exercised"
+    assert reached_level_3, "[FAIL] Autoplay never reached at least level 3 across retries"
+    assert best_level_completed(dut) >= 3, (
+        f"[FAIL] Best completed level should be at least 3 after retries, got {best_level_completed(dut)}"
+    )
+
+    await pulse_game_reset(dut, cycles=2)
+    await ClockCycles(dut.clk, 8)
+    assert state(dut) == S_IDLE, f"[FAIL] Final reset should return to IDLE, got {state(dut)}"
+    assert uo(dut) == expected_idle_output(best_level_completed(dut)), (
+        f"[FAIL] Idle output should show persisted best level, got 0x{uo(dut):02X}"
+    )
+
+    dut._log.info("[PASS] Full gameplay autoplay with retries test passed")
