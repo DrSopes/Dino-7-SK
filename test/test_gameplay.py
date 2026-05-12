@@ -1,5 +1,5 @@
 import cocotb
-from cocotb.triggers import RisingEdge, ClockCycles
+from cocotb.triggers import RisingEdge, ClockCycles, Timer
 
 from test import (
     S_IDLE,
@@ -28,6 +28,10 @@ from test import (
 
 def dut_i(dut):
     return dut.user_project
+
+
+async def settle():
+    await Timer(1, unit="ns")
 
 
 async def wait_cycles_or_until(dut, predicate, timeout_cycles, label):
@@ -75,11 +79,10 @@ async def test_gameplay_state_walkthrough(dut):
     assert state(dut) == S_IDLE, f"[FAIL] Expected IDLE after reset, got {state(dut)}"
     await start_run_from_idle(dut)
 
-    seen_run = (state(dut) == S_RUN)
-    seen_jump = (state(dut) == S_JUMP)
-    for _ in range(400):
+    seen_run = False
+    seen_jump = False
+    for _ in range(1200):
         await RisingEdge(dut.clk)
-        await autoplay_tick(dut)
         seen_run |= (state(dut) == S_RUN)
         seen_jump |= (state(dut) == S_JUMP)
         if state(dut) == S_HIT:
@@ -181,8 +184,10 @@ async def test_gameplay_victory_path_assisted(dut):
     dut_i(dut).obs_g.value = 0
     dut_i(dut).obs_f.value = 0
     dut_i(dut).jump_timer.value = 7
+    await settle()
 
     await RisingEdge(dut.clk)
+    await settle()
     assert state(dut) == S_WIN, f"[FAIL] Assisted final clear should enter S_WIN, got {state(dut)}"
     assert uo(dut) == WIN_ON, f"[FAIL] WIN should light all seven segments, got 0x{uo(dut):02X}"
 
@@ -190,6 +195,7 @@ async def test_gameplay_victory_path_assisted(dut):
     prev_on = False
     for _ in range(300):
         await RisingEdge(dut.clk)
+        await settle()
         now_on = (uo(dut) == WIN_ON)
         if now_on and not prev_on:
             flashes += 1
