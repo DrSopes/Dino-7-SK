@@ -75,24 +75,28 @@ def state(dut):
     return internal_u(dut, "state")
 
 
-def score(dut):
-    return internal_u(dut, "score")
+def points_in_level(dut):
+    return internal_u(dut, "points_in_level")
 
 
-def max_score(dut):
-    return internal_u(dut, "max_score")
+def best_level_completed(dut):
+    return internal_u(dut, "best_level_completed")
 
 
-def level(dut):
-    return internal_u(dut, "level")
+def current_level(dut):
+    return internal_u(dut, "current_level")
 
 
 def cooldown(dut):
     return internal_u(dut, "cooldown_timer")
 
 
-def frame_max(dut):
-    return internal_u(dut, "frame_max")
+def frame_period(dut):
+    return internal_u(dut, "frame_period")
+
+
+def difficulty_step(dut):
+    return internal_u(dut, "difficulty_step")
 
 
 def obs_c(dut):
@@ -137,7 +141,6 @@ def expected_idle_output(best_level):
 
 def gl_skip_lite(dut, name, reason):
     dut._log.info(f"[SKIP-LITE] {name}: {reason}")
-    return
 
 
 def log_state(dut, tag="STATE"):
@@ -149,11 +152,11 @@ def log_state(dut, tag="STATE"):
         f"[{tag}] "
         f"uo_out=0x{uo(dut):02X} "
         f"state={state(dut)} "
-        f"score={score(dut)} "
-        f"max_score={max_score(dut)} "
-        f"level={level(dut)} "
+        f"points_in_level={points_in_level(dut)} "
+        f"best_level_completed={best_level_completed(dut)} "
+        f"current_level={current_level(dut)} "
         f"cooldown={cooldown(dut)} "
-        f"frame_max={frame_max(dut)} "
+        f"frame_period={frame_period(dut)} "
         f"obs(c/g/f/p)=({obs_c(dut)}/{obs_g(dut)}/{obs_f(dut)}/{obs_passed(dut)})"
     )
 
@@ -323,7 +326,7 @@ async def autoplay_until_score_increase(dut, timeout_cycles=1500):
     if is_gatelevel(dut):
         raise AssertionError("[FAIL] autoplay_until_score_increase requires RTL-visible score")
 
-    last_score = score(dut)
+    last_points = points_in_level(dut)
 
     for i in range(timeout_cycles):
         await RisingEdge(dut.clk)
@@ -333,11 +336,11 @@ async def autoplay_until_score_increase(dut, timeout_cycles=1500):
             await ClockCycles(dut.clk, 1)
             dut.ui_in.value = ui(dut) & ~0x01
 
-        if score(dut) > last_score:
-            dut._log.info(f"[PASS] Score increased from {last_score} to {score(dut)} after {i+1} cycles")
+        if points_in_level(dut) > last_points:
+            dut._log.info(f"[PASS] Points increased from {last_points} to {points_in_level(dut)} after {i+1} cycles")
             return
 
-    raise AssertionError("[FAIL] Could not increase score with autoplay")
+    raise AssertionError("[FAIL] Could not increase points with autoplay")
 
 
 @cocotb.test()
@@ -348,9 +351,9 @@ async def test_boot_idle(dut):
     assert uo(dut) == expected_idle_output(0), f"[FAIL] Expected idle 0xBF, got 0x{uo(dut):02X}"
     if not is_gatelevel(dut):
         assert state(dut) == S_IDLE, f"[FAIL] Expected IDLE after reset, got {state(dut)}"
-        assert score(dut) == 0, f"[FAIL] Score should reset to 0, got {score(dut)}"
-        assert max_score(dut) == 0, f"[FAIL] Max score should reset to 0, got {max_score(dut)}"
-        assert level(dut) == 0, f"[FAIL] Level should reset to 0, got {level(dut)}"
+        assert points_in_level(dut) == 0, f"[FAIL] Points should reset to 0, got {points_in_level(dut)}"
+        assert best_level_completed(dut) == 0, f"[FAIL] Best level should reset to 0, got {best_level_completed(dut)}"
+        assert current_level(dut) == 0, f"[FAIL] Current level should reset to 0, got {current_level(dut)}"
     dut._log.info("[PASS] Boot idle test passed")
 
 
@@ -401,9 +404,9 @@ async def test_reset_from_gameplay(dut):
     await wait_for_output_change(dut, timeout_cycles=120, label="pre-reset gameplay activity")
     await pulse_game_reset(dut, cycles=2)
     await ClockCycles(dut.clk, 10)
-    expected = expected_idle_output(max_score(dut))
+    expected = expected_idle_output(best_level_completed(dut))
     assert state(dut) == S_IDLE, f"[FAIL] Reset from gameplay should go to IDLE, got {state(dut)}"
-    assert level(dut) == 0, f"[FAIL] Reset from gameplay should clear level, got {level(dut)}"
+    assert current_level(dut) == 0, f"[FAIL] Reset from gameplay should clear current_level, got {current_level(dut)}"
     assert uo(dut) == expected, f"[FAIL] Reset from gameplay should show 0x{expected:02X}, got 0x{uo(dut):02X}"
     dut._log.info("[PASS] Reset from gameplay test passed")
 
@@ -417,12 +420,12 @@ async def test_difficulty_modes(dut):
         gl_skip_lite(dut, "test_difficulty_modes", "difficulty divider not observable in GL netlist")
         return
 
-    assert frame_max(dut) == 10, f"[FAIL] NORMAL frame_max should be 10, got {frame_max(dut)}"
-    dut._log.info(f"[INFO] NORMAL frame_max={frame_max(dut)}")
+    assert frame_period(dut) == 10, f"[FAIL] NORMAL frame_period should be 10, got {frame_period(dut)}"
+    dut._log.info(f"[INFO] NORMAL frame_period={frame_period(dut)}")
 
     await apply_reset(dut, difficulty_bits=0b11, seed_bits=0b1111)
-    assert frame_max(dut) == 4, f"[FAIL] INSANE frame_max should be 4, got {frame_max(dut)}"
-    dut._log.info(f"[INFO] INSANE frame_max={frame_max(dut)}")
+    assert frame_period(dut) == 4, f"[FAIL] INSANE frame_period should be 4, got {frame_period(dut)}"
+    dut._log.info(f"[INFO] INSANE frame_period={frame_period(dut)}")
     dut._log.info("[PASS] Difficulty mode test passed")
 
 
@@ -450,11 +453,11 @@ async def test_level_up_at_seven(dut):
         return
 
     dut_i(dut).state.value = S_JUMP
-    dut_i(dut).score.value = 6
-    dut_i(dut).max_score.value = 0
-    dut_i(dut).level.value = 0
-    dut_i(dut).frame_max.value = 10
-    dut_i(dut).speed_step.value = 2
+    dut_i(dut).points_in_level.value = 6
+    dut_i(dut).best_level_completed.value = 0
+    dut_i(dut).current_level.value = 0
+    dut_i(dut).frame_period.value = 10
+    dut_i(dut).difficulty_step.value = 2
     dut_i(dut).clk_div.value = 10
     dut_i(dut).obs_passed.value = 1
     dut_i(dut).obs_c.value = 0
@@ -465,10 +468,10 @@ async def test_level_up_at_seven(dut):
 
     await step_clk(dut, 1)
     assert state(dut) == S_JUMP, f"[FAIL] Should stay in JUMP after level-up, got {state(dut)}"
-    assert score(dut) == 0, f"[FAIL] Score should reset after reaching 7, got {score(dut)}"
-    assert level(dut) == 1, f"[FAIL] Level should increment to 1, got {level(dut)}"
-    assert max_score(dut) == 1, f"[FAIL] Max score/best level should become 1, got {max_score(dut)}"
-    assert frame_max(dut) == 8, f"[FAIL] Difficulty should increase, frame_max should be 8, got {frame_max(dut)}"
+    assert points_in_level(dut) == 0, f"[FAIL] Points should reset after reaching 7, got {points_in_level(dut)}"
+    assert current_level(dut) == 1, f"[FAIL] Current level should increment to 1, got {current_level(dut)}"
+    assert best_level_completed(dut) == 1, f"[FAIL] Best completed level should become 1, got {best_level_completed(dut)}"
+    assert frame_period(dut) == 8, f"[FAIL] Difficulty should increase, frame_period should be 8, got {frame_period(dut)}"
     dut._log.info("[PASS] Level-up-at-seven test passed")
 
 
@@ -482,22 +485,22 @@ async def test_level_persistence_after_reset(dut):
         return
 
     dut_i(dut).state.value = S_JUMP
-    dut_i(dut).score.value = 6
-    dut_i(dut).max_score.value = 0
-    dut_i(dut).level.value = 0
-    dut_i(dut).frame_max.value = 10
-    dut_i(dut).speed_step.value = 2
+    dut_i(dut).points_in_level.value = 6
+    dut_i(dut).best_level_completed.value = 0
+    dut_i(dut).current_level.value = 0
+    dut_i(dut).frame_period.value = 10
+    dut_i(dut).difficulty_step.value = 2
     dut_i(dut).clk_div.value = 10
     dut_i(dut).obs_passed.value = 1
     dut_i(dut).jump_timer.value = 7
     await settle()
 
     await step_clk(dut, 1)
-    assert max_score(dut) == 1, f"[FAIL] Expected best completed level to be 1, got {max_score(dut)}"
+    assert best_level_completed(dut) == 1, f"[FAIL] Expected best completed level to be 1, got {best_level_completed(dut)}"
     await pulse_game_reset(dut, cycles=2)
     await ClockCycles(dut.clk, 10)
     assert state(dut) == S_IDLE, f"[FAIL] Reset should go to IDLE, got {state(dut)}"
-    assert level(dut) == 0, f"[FAIL] Current level should clear to 0, got {level(dut)}"
+    assert current_level(dut) == 0, f"[FAIL] Current level should clear to 0, got {current_level(dut)}"
     assert uo(dut) == expected_idle_output(1), f"[FAIL] IDLE should show best level 1, got 0x{uo(dut):02X}"
     dut._log.info("[PASS] Level persistence test passed")
 
@@ -512,11 +515,11 @@ async def test_win_sequence_7_flashes(dut):
         return
 
     dut_i(dut).state.value = S_JUMP
-    dut_i(dut).score.value = 6
-    dut_i(dut).max_score.value = 6
-    dut_i(dut).level.value = 6
-    dut_i(dut).frame_max.value = 0
-    dut_i(dut).speed_step.value = 1
+    dut_i(dut).points_in_level.value = 6
+    dut_i(dut).best_level_completed.value = 6
+    dut_i(dut).current_level.value = 6
+    dut_i(dut).frame_period.value = 0
+    dut_i(dut).difficulty_step.value = 1
     dut_i(dut).clk_div.value = 0
     dut_i(dut).obs_passed.value = 1
     dut_i(dut).obs_c.value = 0
@@ -536,7 +539,6 @@ async def test_win_sequence_7_flashes(dut):
         if now_on and not prev_on:
             flashes += 1
         prev_on = now_on
-
         if state(dut) == S_IDLE:
             break
         await step_clk(dut, 1)

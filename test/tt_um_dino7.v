@@ -14,7 +14,7 @@ module tt_um_dino7 (
     assign uio_out = 8'b0;
     assign uio_oe  = 8'b0;
 
-    wire _unused = &{ena, uio_in, 1'b0};
+    wire unused_ok = &{ena, uio_in, 1'b0};
 
     wire jump_btn = ui_in[0];
     wire game_rst = ui_in[1];
@@ -31,38 +31,38 @@ module tt_um_dino7 (
     localparam S_WIN   = 3'd5;
 
     reg [2:0] state;
-    reg [3:0] score;
-    reg [3:0] max_score;       // best completed level count, 0..7
-    reg [2:0] level;           // current level index, 0..6
+    reg [3:0] points_in_level;
+    reg [3:0] best_level_completed;
+    reg [2:0] current_level;
 
     reg [23:0] clk_div;
-    reg [23:0] frame_max;
-    reg [23:0] speed_step;
-    wire frame_tick = (clk_div >= frame_max);
+    reg [23:0] frame_period;
+    reg [23:0] difficulty_step;
+    wire frame_tick = (clk_div >= frame_period);
 
     reg obs_c, obs_g, obs_f, obs_passed;
     reg [2:0] jump_timer;
     reg [2:0] cooldown_timer;
-    reg [4:0] blink_timer;
-    reg [3:0] win_flash_count;
+    reg [4:0] flash_timer;
+    reg [3:0] victory_flash_phase;
 
-    reg [23:0] init_base_speed;
-    reg [23:0] init_speed_step;
+    reg [23:0] base_frame_period;
+    reg [23:0] base_difficulty_step;
 
     always @(difficulty) begin
         `ifdef COCOTB_SIM
             case (difficulty)
-                2'b00: begin init_base_speed = 24'd10; init_speed_step = 24'd2; end
-                2'b01: begin init_base_speed = 24'd8;  init_speed_step = 24'd2; end
-                2'b10: begin init_base_speed = 24'd6;  init_speed_step = 24'd1; end
-                default: begin init_base_speed = 24'd4; init_speed_step = 24'd1; end
+                2'b00: begin base_frame_period = 24'd10; base_difficulty_step = 24'd2; end
+                2'b01: begin base_frame_period = 24'd8;  base_difficulty_step = 24'd2; end
+                2'b10: begin base_frame_period = 24'd6;  base_difficulty_step = 24'd1; end
+                default: begin base_frame_period = 24'd4; base_difficulty_step = 24'd1; end
             endcase
         `else
             case (difficulty)
-                2'b00: begin init_base_speed = 24'd6_250_000; init_speed_step = 24'd1_000_000; end
-                2'b01: begin init_base_speed = 24'd5_000_000; init_speed_step = 24'd1_000_000; end
-                2'b10: begin init_base_speed = 24'd3_750_000; init_speed_step = 24'd800_000;   end
-                default: begin init_base_speed = 24'd2_500_000; init_speed_step = 24'd500_000; end
+                2'b00: begin base_frame_period = 24'd6_250_000; base_difficulty_step = 24'd1_000_000; end
+                2'b01: begin base_frame_period = 24'd5_000_000; base_difficulty_step = 24'd1_000_000; end
+                2'b10: begin base_frame_period = 24'd3_750_000; base_difficulty_step = 24'd800_000;   end
+                default: begin base_frame_period = 24'd2_500_000; base_difficulty_step = 24'd500_000; end
             endcase
         `endif
     end
@@ -71,9 +71,9 @@ module tt_um_dino7 (
         if (!rst_n) begin
             state <= S_IDLE;
             clk_div <= 0;
-            score <= 0;
-            max_score <= 0;
-            level <= 0;
+            points_in_level <= 0;
+            best_level_completed <= 0;
+            current_level <= 0;
             obs_c <= 0;
             obs_g <= 0;
             obs_f <= 0;
@@ -81,15 +81,15 @@ module tt_um_dino7 (
             jump_timer <= 0;
             cooldown_timer <= 0;
             lfsr <= {28'hA5A5A5A, seed};
-            frame_max <= init_base_speed;
-            speed_step <= init_speed_step;
-            blink_timer <= 0;
-            win_flash_count <= 0;
+            frame_period <= base_frame_period;
+            difficulty_step <= base_difficulty_step;
+            flash_timer <= 0;
+            victory_flash_phase <= 0;
         end else if (game_rst) begin
             state <= S_IDLE;
             clk_div <= 0;
-            score <= 0;
-            level <= 0;
+            points_in_level <= 0;
+            current_level <= 0;
             obs_c <= 0;
             obs_g <= 0;
             obs_f <= 0;
@@ -97,12 +97,12 @@ module tt_um_dino7 (
             jump_timer <= 0;
             cooldown_timer <= 0;
             lfsr <= {lfsr[27:0], seed};
-            frame_max <= init_base_speed;
-            speed_step <= init_speed_step;
-            blink_timer <= 0;
-            win_flash_count <= 0;
+            frame_period <= base_frame_period;
+            difficulty_step <= base_difficulty_step;
+            flash_timer <= 0;
+            victory_flash_phase <= 0;
         end else begin
-            clk_div <= clk_div + 1;
+            clk_div <= clk_div + 1'b1;
 
             if (state == S_IDLE && jump_btn) begin
                 state <= S_RUN;
@@ -129,76 +129,73 @@ module tt_um_dino7 (
 
                         if (obs_f && state == S_RUN) begin
                             state <= S_HIT;
-                            blink_timer <= 5;
-                        end else begin
-                            if (obs_passed && state == S_JUMP) begin
-                                if (score == 4'd6) begin
-                                    if (level == 3'd6) begin
-                                        score <= 4'd7;
-                                        state <= S_WIN;
-                                        blink_timer <= 0;
-                                        win_flash_count <= 0;
-                                        if (max_score < 4'd7)
-                                            max_score <= 4'd7;
-                                    end else begin
-                                        score <= 4'd0;
-                                        level <= level + 1'b1;
-                                        if (max_score < ({1'b0, level} + 4'd1))
-                                            max_score <= {1'b0, level} + 4'd1;
-                                        if (frame_max > speed_step)
-                                            frame_max <= frame_max - speed_step;
-                                    end
+                            flash_timer <= 5;
+                        end else if (obs_passed && state == S_JUMP) begin
+                            if (points_in_level == 4'd6) begin
+                                if (current_level == 3'd6) begin
+                                    points_in_level <= 4'd7;
+                                    if (best_level_completed < 4'd7)
+                                        best_level_completed <= 4'd7;
+                                    state <= S_WIN;
+                                    flash_timer <= 0;
+                                    victory_flash_phase <= 0;
                                 end else begin
-                                    score <= score + 1'b1;
+                                    points_in_level <= 0;
+                                    current_level <= current_level + 1'b1;
+                                    if (best_level_completed < ({1'b0, current_level} + 4'd1))
+                                        best_level_completed <= ({1'b0, current_level} + 4'd1);
+                                    if (frame_period > base_difficulty_step)
+                                        frame_period <= frame_period - base_difficulty_step;
                                 end
+                            end else begin
+                                points_in_level <= points_in_level + 1'b1;
                             end
                         end
 
                         if (state == S_JUMP) begin
                             if (jump_timer > 0) begin
                                 jump_timer <= jump_timer - 1'b1;
-                            end else if (!(obs_passed && score == 4'd6 && level == 3'd6)) begin
+                            end else if (!(obs_passed && points_in_level == 4'd6 && current_level == 3'd6)) begin
                                 state <= S_RUN;
                                 cooldown_timer <= 3'd2;
                             end
-                        end else begin
-                            if (cooldown_timer > 0)
-                                cooldown_timer <= cooldown_timer - 1'b1;
+                        end else if (cooldown_timer > 0) begin
+                            cooldown_timer <= cooldown_timer - 1'b1;
                         end
                     end
 
                     S_HIT: begin
-                        if (blink_timer > 0)
-                            blink_timer <= blink_timer - 1'b1;
+                        if (flash_timer > 0)
+                            flash_timer <= flash_timer - 1'b1;
                         else
                             state <= S_SCORE;
                     end
 
                     S_SCORE: begin
-                        blink_timer <= blink_timer + 1'b1;
+                        flash_timer <= flash_timer + 1'b1;
                     end
 
                     S_WIN: begin
-                        if (blink_timer > 0) begin
-                            blink_timer <= blink_timer - 1'b1;
+                        if (flash_timer > 0) begin
+                            flash_timer <= flash_timer - 1'b1;
                         end else begin
-                            blink_timer <= 5;
-                            if (win_flash_count < 4'd13) begin
-                                win_flash_count <= win_flash_count + 1'b1;
+                            flash_timer <= 5;
+                            if (victory_flash_phase < 4'd13) begin
+                                victory_flash_phase <= victory_flash_phase + 1'b1;
                             end else begin
                                 state <= S_IDLE;
-                                score <= 0;
-                                level <= 0;
+                                points_in_level <= 0;
+                                current_level <= 0;
                                 obs_c <= 0;
                                 obs_g <= 0;
                                 obs_f <= 0;
                                 obs_passed <= 0;
                                 jump_timer <= 0;
                                 cooldown_timer <= 0;
-                                frame_max <= init_base_speed;
-                                speed_step <= init_speed_step;
-                                blink_timer <= 0;
-                                win_flash_count <= 0;
+                                frame_period <= base_frame_period;
+                                difficulty_step <= base_difficulty_step;
+                                flash_timer <= 0;
+                                victory_flash_phase <= 0;
                             end
                         end
                     end
@@ -231,26 +228,26 @@ module tt_um_dino7 (
     reg [7:0] out;
     always @(*) begin
         if (state == S_IDLE) begin
-            out = {1'b1, seg7(max_score)};
+            out = {1'b1, seg7(best_level_completed)};
         end else if (state == S_HIT) begin
             out = 8'b11111111;
         end else if (state == S_WIN) begin
-            if (win_flash_count[0] == 1'b0)
+            if (victory_flash_phase[0] == 1'b0)
                 out = 8'b01111111;
             else
                 out = 8'b00000000;
         end else if (state == S_SCORE) begin
-            if (blink_timer[3])
-                out = {1'b1, seg7(max_score)};
+            if (flash_timer[3])
+                out = {1'b1, seg7(best_level_completed)};
             else
-                out = {1'b0, seg7(score)};
+                out = {1'b0, seg7(points_in_level)};
         end else begin
             out[0] = obs_c;
             out[1] = obs_g;
             out[2] = (state == S_RUN);
             out[3] = obs_passed;
             out[4] = (state == S_JUMP);
-            out[5] = 1'b0;
+            out[5] = unused_ok;
             out[6] = obs_f;
             out[7] = (cooldown_timer > 0);
         end
