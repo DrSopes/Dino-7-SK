@@ -9,7 +9,6 @@ from test import (
     S_HIT,
     S_SCORE,
     apply_reset,
-    frame_max,
     gl_skip_lite,
     has_bit,
     is_gatelevel,
@@ -31,6 +30,12 @@ def dut_i(dut):
 
 async def settle():
     await Timer(1, unit="ns")
+
+
+async def step_clk(dut, cycles=1):
+    for _ in range(cycles):
+        await RisingEdge(dut.clk)
+        await settle()
 
 
 @cocotb.test()
@@ -71,6 +76,7 @@ async def test_seg7_score_exhaustive(dut):
         dut_i(dut).max_score.value = 9 - val
         dut_i(dut).blink_timer.value = 0
         await settle()
+
         expected_score = seg7_encode(val)
         assert uo(dut) == expected_score, (
             f"[FAIL] SCORE current-score mismatch for {val}: expected 0x{expected_score:02X}, got 0x{uo(dut):02X}"
@@ -80,6 +86,7 @@ async def test_seg7_score_exhaustive(dut):
         dut_i(dut).blink_timer.value = 8
         dut_i(dut).max_score.value = val
         await settle()
+
         expected_high = 0x80 | seg7_encode(val)
         assert uo(dut) == expected_high, (
             f"[FAIL] SCORE high-score mismatch for {val}: expected 0x{expected_high:02X}, got 0x{uo(dut):02X}"
@@ -105,6 +112,7 @@ async def test_gameplay_output_mapping(dut):
     dut_i(dut).obs_passed.value = 1
     dut_i(dut).cooldown_timer.value = 2
     await settle()
+
     expected_run = 0b11001101
     assert uo(dut) == expected_run, (
         f"[FAIL] RUN mapping mismatch: expected 0x{expected_run:02X}, got 0x{uo(dut):02X}"
@@ -117,6 +125,7 @@ async def test_gameplay_output_mapping(dut):
     dut_i(dut).obs_passed.value = 1
     dut_i(dut).cooldown_timer.value = 0
     await settle()
+
     expected_jump = 0b00011010
     assert uo(dut) == expected_jump, (
         f"[FAIL] JUMP mapping mismatch: expected 0x{expected_jump:02X}, got 0x{uo(dut):02X}"
@@ -147,22 +156,22 @@ async def test_obstacle_pipeline_jump_scores(dut):
     dut_i(dut).obs_passed.value = 0
     await settle()
 
-    await RisingEdge(dut.clk)
+    await step_clk(dut, 2)
     assert obs_c(dut) == 0 and obs_g(dut) == 1 and obs_f(dut) == 0, (
         f"[FAIL] stage1 mismatch: c/g/f=({obs_c(dut)}/{obs_g(dut)}/{obs_f(dut)})"
     )
 
-    await RisingEdge(dut.clk)
+    await step_clk(dut, 1)
     assert obs_c(dut) == 0 and obs_g(dut) == 0 and obs_f(dut) == 1, (
         f"[FAIL] stage2 mismatch: c/g/f=({obs_c(dut)}/{obs_g(dut)}/{obs_f(dut)})"
     )
 
-    await RisingEdge(dut.clk)
+    await step_clk(dut, 1)
     assert obs_f(dut) == 0 and dut_i(dut).obs_passed.value.integer == 1, (
         f"[FAIL] stage3 mismatch: obs_f={obs_f(dut)} obs_passed={dut_i(dut).obs_passed.value.integer}"
     )
 
-    await RisingEdge(dut.clk)
+    await step_clk(dut, 1)
     assert score(dut) == 1, f"[FAIL] Score should increment after a jumped obstacle, got {score(dut)}"
     assert state(dut) == S_JUMP, f"[FAIL] State should still be JUMP during short pipeline test, got {state(dut)}"
 
@@ -191,7 +200,7 @@ async def test_run_hit_updates_high_score(dut):
     dut_i(dut).lfsr.value = 0
     await settle()
 
-    await RisingEdge(dut.clk)
+    await step_clk(dut, 2)
     assert state(dut) == S_HIT, f"[FAIL] RUN + obs_f should transition to HIT, got {state(dut)}"
     assert max_score(dut) == 3, f"[FAIL] max_score should update on hit, got {max_score(dut)}"
     assert uo(dut) == 0xFF, f"[FAIL] HIT output should be 0xFF, got 0x{uo(dut):02X}"
