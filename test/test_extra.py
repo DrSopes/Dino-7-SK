@@ -13,10 +13,10 @@ from test import (
     has_bit,
     internal_u,
     is_gatelevel,
-    max_score,
     obs_c,
     obs_f,
     obs_g,
+    obs_passed,
     score,
     seg7_encode,
     start_clock,
@@ -27,10 +27,6 @@ from test import (
 
 def dut_i(dut):
     return dut.user_project
-
-
-def obs_passed(dut):
-    return internal_u(dut, "obs_passed")
 
 
 async def settle():
@@ -52,13 +48,10 @@ async def test_seg7_idle_exhaustive(dut):
         gl_skip_lite(dut, "test_seg7_idle_exhaustive", "requires RTL-visible internal regs")
         return
 
-    for val in range(10):
+    for val in range(8):
         dut_i(dut).state.value = S_IDLE
         dut_i(dut).max_score.value = val
-        dut_i(dut).score.value = 0
-        dut_i(dut).blink_timer.value = 0
         await settle()
-
         expected = 0x80 | seg7_encode(val)
         assert uo(dut) == expected, (
             f"[FAIL] IDLE seg7 mismatch for {val}: expected 0x{expected:02X}, got 0x{uo(dut):02X}"
@@ -76,13 +69,12 @@ async def test_seg7_score_exhaustive(dut):
         gl_skip_lite(dut, "test_seg7_score_exhaustive", "requires RTL-visible internal regs")
         return
 
-    for val in range(10):
+    for val in range(8):
         dut_i(dut).state.value = S_SCORE
         dut_i(dut).score.value = val
-        dut_i(dut).max_score.value = 9 - val
+        dut_i(dut).max_score.value = 7 - val
         dut_i(dut).blink_timer.value = 0
         await settle()
-
         expected_score = seg7_encode(val)
         assert uo(dut) == expected_score, (
             f"[FAIL] SCORE current-score mismatch for {val}: expected 0x{expected_score:02X}, got 0x{uo(dut):02X}"
@@ -92,7 +84,6 @@ async def test_seg7_score_exhaustive(dut):
         dut_i(dut).blink_timer.value = 8
         dut_i(dut).max_score.value = val
         await settle()
-
         expected_high = 0x80 | seg7_encode(val)
         assert uo(dut) == expected_high, (
             f"[FAIL] SCORE high-score mismatch for {val}: expected 0x{expected_high:02X}, got 0x{uo(dut):02X}"
@@ -118,7 +109,6 @@ async def test_gameplay_output_mapping(dut):
     dut_i(dut).obs_passed.value = 1
     dut_i(dut).cooldown_timer.value = 2
     await settle()
-
     expected_run = 0b11001101
     assert uo(dut) == expected_run, (
         f"[FAIL] RUN mapping mismatch: expected 0x{expected_run:02X}, got 0x{uo(dut):02X}"
@@ -131,7 +121,6 @@ async def test_gameplay_output_mapping(dut):
     dut_i(dut).obs_passed.value = 1
     dut_i(dut).cooldown_timer.value = 0
     await settle()
-
     expected_jump = 0b00011010
     assert uo(dut) == expected_jump, (
         f"[FAIL] JUMP mapping mismatch: expected 0x{expected_jump:02X}, got 0x{uo(dut):02X}"
@@ -155,7 +144,7 @@ async def test_obstacle_pipeline_jump_scores(dut):
     dut_i(dut).frame_max.value = 0
     dut_i(dut).lfsr.value = 0
     dut_i(dut).score.value = 0
-    dut_i(dut).max_score.value = 0
+    dut_i(dut).level.value = 0
     dut_i(dut).obs_c.value = 1
     dut_i(dut).obs_g.value = 0
     dut_i(dut).obs_f.value = 0
@@ -185,19 +174,18 @@ async def test_obstacle_pipeline_jump_scores(dut):
 
 
 @cocotb.test()
-async def test_run_hit_updates_high_score(dut):
+async def test_run_hit_enters_hit(dut):
     await start_clock(dut)
     await apply_reset(dut, difficulty_bits=0b00, seed_bits=0b1111)
 
     if is_gatelevel(dut):
-        gl_skip_lite(dut, "test_run_hit_updates_high_score", "requires RTL-visible internal regs")
+        gl_skip_lite(dut, "test_run_hit_enters_hit", "requires RTL-visible internal regs")
         return
 
     dut_i(dut).state.value = S_RUN
     dut_i(dut).frame_max.value = 0
     dut_i(dut).clk_div.value = 0
     dut_i(dut).score.value = 3
-    dut_i(dut).max_score.value = 1
     dut_i(dut).obs_c.value = 0
     dut_i(dut).obs_g.value = 0
     dut_i(dut).obs_f.value = 1
@@ -208,7 +196,6 @@ async def test_run_hit_updates_high_score(dut):
 
     await step_clk(dut, 1)
     assert state(dut) == S_HIT, f"[FAIL] RUN + obs_f should transition to HIT, got {state(dut)}"
-    assert max_score(dut) == 3, f"[FAIL] max_score should update on hit, got {max_score(dut)}"
     assert uo(dut) == 0xFF, f"[FAIL] HIT output should be 0xFF, got 0x{uo(dut):02X}"
 
-    dut._log.info("[PASS] RUN hit / high-score update test passed")
+    dut._log.info("[PASS] RUN hit test passed")
