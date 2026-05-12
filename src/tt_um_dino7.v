@@ -46,13 +46,22 @@ module tt_um_dino7 (
     reg [23:0] init_base_speed;
     reg [23:0] init_speed_step;
 
-    always @(*) begin
-        case (difficulty)
-            2'b00: begin init_base_speed = 24'd10; init_speed_step = 24'd2; end
-            2'b01: begin init_base_speed = 24'd8;  init_speed_step = 24'd2; end
-            2'b10: begin init_base_speed = 24'd6;  init_speed_step = 24'd1; end
-            default: begin init_base_speed = 24'd4; init_speed_step = 24'd1; end
-        endcase
+    always @(difficulty) begin
+        `ifdef COCOTB_SIM
+            case (difficulty)
+                2'b00: begin init_base_speed = 24'd10; init_speed_step = 24'd2; end
+                2'b01: begin init_base_speed = 24'd8;  init_speed_step = 24'd2; end
+                2'b10: begin init_base_speed = 24'd6;  init_speed_step = 24'd1; end
+                default: begin init_base_speed = 24'd4; init_speed_step = 24'd1; end
+            endcase
+        `else
+            case (difficulty)
+                2'b00: begin init_base_speed = 24'd6_250_000; init_speed_step = 24'd1_000_000; end
+                2'b01: begin init_base_speed = 24'd5_000_000; init_speed_step = 24'd1_000_000; end
+                2'b10: begin init_base_speed = 24'd3_750_000; init_speed_step = 24'd800_000;   end
+                default: begin init_base_speed = 24'd2_500_000; init_speed_step = 24'd500_000; end
+            endcase
+        `endif
     end
 
     always @(posedge clk) begin
