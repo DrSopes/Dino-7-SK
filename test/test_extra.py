@@ -11,6 +11,7 @@ from test import (
     apply_reset,
     gl_skip_lite,
     has_bit,
+    internal_u,
     is_gatelevel,
     max_score,
     obs_c,
@@ -26,6 +27,10 @@ from test import (
 
 def dut_i(dut):
     return dut.user_project
+
+
+def obs_passed(dut):
+    return internal_u(dut, "obs_passed")
 
 
 async def settle():
@@ -157,20 +162,19 @@ async def test_obstacle_pipeline_jump_scores(dut):
     dut_i(dut).obs_passed.value = 0
     await settle()
 
-    # frame_tick es true ya en el primer ciclo cuando clk_div=0 y frame_max=0
     await step_clk(dut, 1)
-    assert obs_c(dut) == 0 and obs_g(dut) == 1 and obs_f(dut) == 0 and dut_i(dut).obs_passed.value.integer == 0, (
-        f"[FAIL] stage1 mismatch: c/g/f/p=({obs_c(dut)}/{obs_g(dut)}/{obs_f(dut)}/{dut_i(dut).obs_passed.value.integer})"
+    assert obs_c(dut) == 0 and obs_g(dut) == 1 and obs_f(dut) == 0 and obs_passed(dut) == 0, (
+        f"[FAIL] stage1 mismatch: c/g/f/p=({obs_c(dut)}/{obs_g(dut)}/{obs_f(dut)}/{obs_passed(dut)})"
     )
 
     await step_clk(dut, 1)
-    assert obs_c(dut) == 0 and obs_g(dut) == 0 and obs_f(dut) == 1 and dut_i(dut).obs_passed.value.integer == 0, (
-        f"[FAIL] stage2 mismatch: c/g/f/p=({obs_c(dut)}/{obs_g(dut)}/{obs_f(dut)}/{dut_i(dut).obs_passed.value.integer})"
+    assert obs_c(dut) == 0 and obs_g(dut) == 0 and obs_f(dut) == 1 and obs_passed(dut) == 0, (
+        f"[FAIL] stage2 mismatch: c/g/f/p=({obs_c(dut)}/{obs_g(dut)}/{obs_f(dut)}/{obs_passed(dut)})"
     )
 
     await step_clk(dut, 1)
-    assert obs_c(dut) == 0 and obs_g(dut) == 0 and obs_f(dut) == 0 and dut_i(dut).obs_passed.value.integer == 1, (
-        f"[FAIL] stage3 mismatch: c/g/f/p=({obs_c(dut)}/{obs_g(dut)}/{obs_f(dut)}/{dut_i(dut).obs_passed.value.integer})"
+    assert obs_c(dut) == 0 and obs_g(dut) == 0 and obs_f(dut) == 0 and obs_passed(dut) == 1, (
+        f"[FAIL] stage3 mismatch: c/g/f/p=({obs_c(dut)}/{obs_g(dut)}/{obs_f(dut)}/{obs_passed(dut)})"
     )
 
     await step_clk(dut, 1)
