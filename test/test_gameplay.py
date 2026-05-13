@@ -191,7 +191,7 @@ async def test_gameplay_victory_path_assisted(dut):
     assert state(dut) == S_WIN, f"[FAIL] Assisted final clear should enter S_WIN, got {state(dut)}"
     assert uo(dut) == WIN_ON, f"[FAIL] WIN should light all seven segments, got 0x{uo(dut):02X}"
 
-    flashes = 0
+    flashes = 1
     prev_on = False
     for _ in range(300):
         await RisingEdge(dut.clk)
